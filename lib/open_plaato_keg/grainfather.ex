@@ -63,15 +63,15 @@ defmodule OpenPlaatoKeg.Grainfather do
         t when is_number(t) -> temp_for_unit(t, unit)
       end
 
-    # API requires temperature and specific_gravity
+    # API requires temp and sg
     if temp_value == nil do
       Logger.debug("Grainfather: skip (no temperature)")
       :skip
     else
       body = %{
-        "specific_gravity" => sg,
-        "temperature" => temp_value,
-        "unit" => unit
+        "sg" => sg,
+        "temp" => temp_value,
+        "temp_unit" => (if unit == "fahrenheit", do: "°F", else: "°C")
       }
 
       body =
