@@ -509,27 +509,38 @@ defmodule OpenPlaatoKeg.HttpRouter do
       "fahrenheit" -> "fahrenheit"
       _ -> "celsius"
     end
-    sg = params["specific_gravity"] |> parse_airlock_value() |> Kernel.||("1.0")
-    url = (params["url"] || "") |> to_string() |> String.trim()
+    raw_sg = params["specific_gravity"]
+    parsed_sg = parse_airlock_value(raw_sg)
 
-    data = [
-      {:grainfather_enabled, to_string(enabled)},
-      {:grainfather_unit, unit},
-      {:grainfather_specific_gravity, sg},
-      {:grainfather_url, url}
-    ]
+    if raw_sg not in [nil, ""] and parsed_sg == nil do
+      json_response(conn, 400, %{
+        status: "error",
+        command: "grainfather",
+        error: "Invalid specific gravity: #{inspect(raw_sg)}. Use a plain number like 1.052."
+      })
+    else
+      sg = parsed_sg || "1.0"
+      url = (params["url"] || "") |> to_string() |> String.trim()
 
-    AirlockData.publish(airlock_id, data)
-    WebSocketHandler.publish_airlock(airlock_id, data)
+      data = [
+        {:grainfather_enabled, to_string(enabled)},
+        {:grainfather_unit, unit},
+        {:grainfather_specific_gravity, sg},
+        {:grainfather_url, url}
+      ]
 
-    json_response(conn, 200, %{
-      status: "ok",
-      command: "grainfather",
-      grainfather_enabled: enabled,
-      grainfather_unit: unit,
-      grainfather_specific_gravity: sg,
-      grainfather_url: url
-    })
+      AirlockData.publish(airlock_id, data)
+      WebSocketHandler.publish_airlock(airlock_id, data)
+
+      json_response(conn, 200, %{
+        status: "ok",
+        command: "grainfather",
+        grainfather_enabled: enabled,
+        grainfather_unit: unit,
+        grainfather_specific_gravity: sg,
+        grainfather_url: url
+      })
+    end
   end
 
   # Brewfather: enable/disable and options for sending this airlock's data to Brewfather custom stream (max every 15 min).
