@@ -28,7 +28,7 @@ services:
       # Unraid: change host path to /mnt/user/appdata/open-plaato-keg:/app/priv/db
       - ./data:/app/priv/db
     environment:
-      - DATABASE_FILE_PATH=/db/keg_data.bin
+      - DATABASE_FILE_PATH=/app/priv/db/keg_data.bin
       - KEG_LISTENER_PORT=1234
       - HTTP_LISTENER_PORT=8085
 
