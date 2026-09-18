@@ -55,6 +55,10 @@ defmodule OpenPlaatoKeg do
     alert_state_path = Path.join(db_folder, "alert_state.bin")
     {:ok, _} = :dets.open_file(:alert_state, [{:file, String.to_charlist(alert_state_path)}])
 
+    # Archived fermentation/keg-drain cycles
+    batch_history_path = Path.join(db_folder, "batch_history.bin")
+    {:ok, _} = :dets.open_file(:batch_history, [{:file, String.to_charlist(batch_history_path)}])
+
     # Ensure tap handle image directory exists (persistent volume)
     File.mkdir_p!(Path.join(db_folder, "tap-handles"))
 

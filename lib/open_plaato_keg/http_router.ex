@@ -4,6 +4,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
   alias OpenPlaatoKeg.KegCommander
   alias OpenPlaatoKeg.Metrics
   alias OpenPlaatoKeg.Models.AirlockData
+  alias OpenPlaatoKeg.Models.BatchHistory
   alias OpenPlaatoKeg.Models.BeerDB
   alias OpenPlaatoKeg.Models.BeverageDB
   alias OpenPlaatoKeg.Models.DataLog
@@ -1480,6 +1481,84 @@ defmodule OpenPlaatoKeg.HttpRouter do
     {from_ts, to_ts} = parse_time_range(range)
     entries = DataLog.get(:airlock, id, from_ts, to_ts)
     json_response(conn, 200, entries)
+  end
+
+  # ============================================
+  # Batch/History – archive a fermentation or keg-drain cycle
+  # ============================================
+
+  post "api/kegs/:id/archive" do
+    keg_id = conn.params["id"]
+    data = KegData.get(keg_id)
+    now = System.system_time(:second)
+    range_start = BatchHistory.most_recent_timestamp(:keg, keg_id) || now - 90 * 86_400
+    entries = DataLog.get(:keg, keg_id, range_start, now)
+
+    temps = entries |> Enum.map(&parse_float_or_nil(&1["keg_temperature"])) |> Enum.reject(&is_nil/1)
+    amounts = entries |> Enum.map(&parse_float_or_nil(&1["amount_left"])) |> Enum.reject(&is_nil/1)
+
+    snapshot = %{
+      "label" => data[:my_label],
+      "beer_style" => data[:my_beer_style],
+      "keg_date" => data[:my_keg_date],
+      "og" => data[:my_og],
+      "fg" => data[:my_fg],
+      "abv" => data[:my_abv],
+      "started_at" => range_start,
+      "ended_at" => now,
+      "temp_min" => (if temps == [], do: nil, else: Enum.min(temps)),
+      "temp_max" => (if temps == [], do: nil, else: Enum.max(temps)),
+      "amount_start" => List.first(amounts),
+      "amount_end" => List.last(amounts)
+    }
+
+    {:ok, archived_at} = BatchHistory.archive(:keg, keg_id, snapshot)
+
+    # Clear beer-specific fields so the next tapped keg starts fresh. The tap
+    # label, scale calibration, and integration settings are properties of
+    # the physical setup, not the beer, so they're left untouched.
+    KegData.publish(keg_id, [
+      {:my_beer_style, ""},
+      {:my_keg_date, ""},
+      {:my_og, ""},
+      {:my_fg, ""},
+      {:my_abv, ""}
+    ])
+    WebSocketHandler.publish(keg_id, [])
+
+    json_response(conn, 200, Map.put(snapshot, "archived_at", archived_at))
+  end
+
+  get "api/kegs/:id/history" do
+    json_response(conn, 200, BatchHistory.list(:keg, conn.params["id"]))
+  end
+
+  post "api/airlocks/:id/archive" do
+    airlock_id = conn.params["id"]
+    data = AirlockData.get(airlock_id)
+    now = System.system_time(:second)
+    range_start = BatchHistory.most_recent_timestamp(:airlock, airlock_id) || now - 90 * 86_400
+    entries = DataLog.get(:airlock, airlock_id, range_start, now)
+
+    temps = entries |> Enum.map(&parse_float_or_nil(&1["temperature"])) |> Enum.reject(&is_nil/1)
+    bubbles = entries |> Enum.map(&parse_float_or_nil(&1["bubbles_per_min"])) |> Enum.reject(&is_nil/1)
+
+    snapshot = %{
+      "label" => data[:label],
+      "started_at" => range_start,
+      "ended_at" => now,
+      "temp_min" => (if temps == [], do: nil, else: Enum.min(temps)),
+      "temp_max" => (if temps == [], do: nil, else: Enum.max(temps)),
+      "temp_avg" => (if temps == [], do: nil, else: Float.round(Enum.sum(temps) / length(temps), 1)),
+      "bubbles_max" => (if bubbles == [], do: nil, else: Enum.max(bubbles))
+    }
+
+    {:ok, archived_at} = BatchHistory.archive(:airlock, airlock_id, snapshot)
+    json_response(conn, 200, Map.put(snapshot, "archived_at", archived_at))
+  end
+
+  get "api/airlocks/:id/history" do
+    json_response(conn, 200, BatchHistory.list(:airlock, conn.params["id"]))
   end
 
   match _ do
