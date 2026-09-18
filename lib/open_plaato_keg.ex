@@ -47,10 +47,34 @@ defmodule OpenPlaatoKeg do
     {:ok, _} = :dets.open_file(:data_log, [{:file, String.to_charlist(data_log_path)}])
     OpenPlaatoKeg.Models.DataLog.init_throttle()
 
+    # Web Push subscriptions and alert state (keg empty, leak, temp, fermentation stalled)
+    push_subscriptions_path = Path.join(db_folder, "push_subscriptions.bin")
+    {:ok, _} =
+      :dets.open_file(:push_subscriptions, [{:file, String.to_charlist(push_subscriptions_path)}])
+
+    alert_state_path = Path.join(db_folder, "alert_state.bin")
+    {:ok, _} = :dets.open_file(:alert_state, [{:file, String.to_charlist(alert_state_path)}])
+
     # Ensure tap handle image directory exists (persistent volume)
     File.mkdir_p!(Path.join(db_folder, "tap-handles"))
 
     OpenPlaatoKeg.AppConfig.load()
+    ensure_vapid_keys()
+  end
+
+  # Generate a VAPID keypair once and persist it via AppConfig (same DETS volume
+  # as everything else), so it survives image rebuilds/redeploys without a
+  # code change and doesn't need to be baked into an env var.
+  defp ensure_vapid_keys do
+    if OpenPlaatoKeg.AppConfig.get(:vapid_public_key, "") == "" do
+      keys = ExNudge.generate_vapid_keys()
+      OpenPlaatoKeg.AppConfig.put(:vapid_public_key, keys.public_key)
+      OpenPlaatoKeg.AppConfig.put(:vapid_private_key, keys.private_key)
+    end
+
+    Application.put_env(:ex_nudge, :vapid_subject, push_config()[:vapid_subject])
+    Application.put_env(:ex_nudge, :vapid_public_key, OpenPlaatoKeg.AppConfig.get(:vapid_public_key))
+    Application.put_env(:ex_nudge, :vapid_private_key, OpenPlaatoKeg.AppConfig.get(:vapid_private_key))
   end
 
   def tap_handle_dir do
@@ -72,5 +96,9 @@ defmodule OpenPlaatoKeg do
 
   def barhelper_config do
     Application.get_env(:open_plaato_keg, :barhelper)
+  end
+
+  def push_config do
+    Application.get_env(:open_plaato_keg, :push)
   end
 end

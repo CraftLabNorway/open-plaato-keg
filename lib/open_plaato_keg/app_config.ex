@@ -9,7 +9,9 @@ defmodule OpenPlaatoKeg.AppConfig do
     watchtower_token: "",
     theme: %{},
     home_page: "taplist",
-    time_format: "12h"
+    time_format: "12h",
+    vapid_public_key: "",
+    vapid_private_key: ""
   }
 
   @doc "Load persisted config from disk into Application env. Call once at startup."
@@ -27,7 +29,9 @@ defmodule OpenPlaatoKeg.AppConfig do
               watchtower_token: Map.get(map, "watchtower_token", @defaults.watchtower_token),
               theme: Map.get(map, "theme", @defaults.theme),
               home_page: Map.get(map, "home_page", @defaults.home_page),
-              time_format: Map.get(map, "time_format", @defaults.time_format)
+              time_format: Map.get(map, "time_format", @defaults.time_format),
+              vapid_public_key: Map.get(map, "vapid_public_key", @defaults.vapid_public_key),
+              vapid_private_key: Map.get(map, "vapid_private_key", @defaults.vapid_private_key)
             }
             Application.put_env(:open_plaato_keg, :app_config, Map.merge(@defaults, loaded))
 

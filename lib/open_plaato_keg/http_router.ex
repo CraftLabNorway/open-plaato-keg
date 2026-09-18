@@ -8,6 +8,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
   alias OpenPlaatoKeg.Models.BeverageDB
   alias OpenPlaatoKeg.Models.DataLog
   alias OpenPlaatoKeg.Models.KegData
+  alias OpenPlaatoKeg.Models.PushSubscription
   alias OpenPlaatoKeg.Models.TransferScaleData
   alias OpenPlaatoKeg.MqttHandler
   alias OpenPlaatoKeg.WebSocketHandler
@@ -26,6 +27,8 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
   plug(:match)
   plug(:dispatch)
+
+  @all_alert_types ["keg_empty", "leak_detected", "temp_out_of_range", "fermentation_stalled"]
 
   get "/" do
     target =
@@ -581,6 +584,121 @@ defmodule OpenPlaatoKeg.HttpRouter do
       brewfather_batch_volume: batch_volume,
       brewfather_url: url
     })
+  end
+
+  # ============================================
+  # Web Push Notifications
+  # ============================================
+
+  get "api/push/vapid-public-key" do
+    json_response(conn, 200, %{public_key: OpenPlaatoKeg.AppConfig.get(:vapid_public_key, "")})
+  end
+
+  post "api/push/subscribe" do
+    p = conn.body_params || %{}
+    device_type = parse_device_type(p["device_type"])
+    device_id = to_string(p["device_id"] || "")
+    sub = p["subscription"] || %{}
+    endpoint = to_string(sub["endpoint"] || "")
+    keys = sub["keys"] || %{}
+    alerts = if is_list(p["alerts"]), do: Enum.map(p["alerts"], &to_string/1), else: @all_alert_types
+
+    cond do
+      device_type == nil ->
+        json_response(conn, 400, %{error: "device_type must be 'keg' or 'airlock'"})
+
+      device_id == "" or endpoint == "" or keys["p256dh"] in [nil, ""] or keys["auth"] in [nil, ""] ->
+        json_response(conn, 400, %{error: "device_id and a full subscription (endpoint, keys.p256dh, keys.auth) are required"})
+
+      true ->
+        PushSubscription.subscribe(device_type, device_id, endpoint, keys, alerts)
+        json_response(conn, 200, %{status: "ok", alerts: alerts})
+    end
+  end
+
+  post "api/push/unsubscribe" do
+    p = conn.body_params || %{}
+    device_type = parse_device_type(p["device_type"])
+    device_id = to_string(p["device_id"] || "")
+    endpoint = to_string(p["endpoint"] || "")
+
+    if device_type == nil or device_id == "" or endpoint == "" do
+      json_response(conn, 400, %{error: "device_type, device_id, and endpoint are required"})
+    else
+      PushSubscription.unsubscribe(device_type, device_id, endpoint)
+      json_response(conn, 200, %{status: "ok"})
+    end
+  end
+
+  post "api/push/test" do
+    p = conn.body_params || %{}
+    device_type = parse_device_type(p["device_type"])
+    device_id = to_string(p["device_id"] || "")
+    endpoint = to_string(p["endpoint"] || "")
+
+    case {device_type, Enum.find(PushSubscription.for_device(device_type, device_id), fn {e, _} -> e == endpoint end)} do
+      {nil, _} ->
+        json_response(conn, 400, %{error: "device_type must be 'keg' or 'airlock'"})
+
+      {_, nil} ->
+        json_response(conn, 404, %{error: "subscription_not_found"})
+
+      {_, {_endpoint, sub}} ->
+        subscription = %ExNudge.Subscription{
+          endpoint: endpoint,
+          keys: %{p256dh: sub.keys["p256dh"], auth: sub.keys["auth"]}
+        }
+
+        payload =
+          Poison.encode!(%{
+            title: "Test notification",
+            body: "If you can see this, notifications are working for this device.",
+            alert_type: "test",
+            device_type: to_string(device_type),
+            device_id: device_id
+          })
+
+        case ExNudge.send_notification(subscription, payload, ttl: 60) do
+          {:ok, _resp} -> json_response(conn, 200, %{status: "ok"})
+          {:error, :subscription_expired} ->
+            PushSubscription.unsubscribe(device_type, device_id, endpoint)
+            json_response(conn, 410, %{error: "subscription_expired"})
+          {:error, reason} -> json_response(conn, 502, %{error: inspect(reason)})
+        end
+    end
+  end
+
+  post "api/kegs/:id/alert-thresholds" do
+    keg_id = conn.params["id"]
+    p = conn.body_params || %{}
+    value = parse_airlock_value(p["low_keg_threshold_percent"])
+
+    if value do
+      KegData.publish(keg_id, [{:my_low_keg_threshold_percent, value}])
+      json_response(conn, 200, %{status: "ok", low_keg_threshold_percent: value})
+    else
+      json_response(conn, 400, %{error: "low_keg_threshold_percent must be a number"})
+    end
+  end
+
+  post "api/airlocks/:id/alert-thresholds" do
+    airlock_id = conn.params["id"]
+    p = conn.body_params || %{}
+    min_temp = parse_airlock_value(p["temp_min"])
+    max_temp = parse_airlock_value(p["temp_max"])
+
+    data =
+      []
+      |> then(fn d -> if min_temp, do: [{:my_temp_alert_min, min_temp} | d], else: d end)
+      |> then(fn d -> if max_temp, do: [{:my_temp_alert_max, max_temp} | d], else: d end)
+
+    if data == [] do
+      json_response(conn, 400, %{error: "temp_min and/or temp_max must be numbers"})
+    else
+      AirlockData.publish(airlock_id, data)
+      WebSocketHandler.publish_airlock(airlock_id, data)
+      json_response(conn, 200, %{status: "ok", temp_min: min_temp, temp_max: max_temp})
+    end
   end
 
   # ============================================
@@ -1415,6 +1533,10 @@ defmodule OpenPlaatoKeg.HttpRouter do
     end
   end
   defp parse_transfer_scale_float(_), do: nil
+
+  defp parse_device_type("keg"), do: :keg
+  defp parse_device_type("airlock"), do: :airlock
+  defp parse_device_type(_), do: nil
 
   defp maybe_append(list, _key, nil), do: list
   defp maybe_append(list, key, value), do: [{key, value} | list] |> Enum.reverse()

@@ -27,6 +27,9 @@ config :open_plaato_keg, :mqtt,
   json_output: get_env!("MQTT_JSON_OUTPUT", :boolean, "true"),
   property_output: get_env!("MQTT_PROPERTY_OUTPUT", :boolean, "true")
 
+config :open_plaato_keg, :push,
+  vapid_subject: get_env("VAPID_SUBJECT", :string, "mailto:post@craftlab.no")
+
 config :open_plaato_keg, :barhelper,
   enabled: get_env!("BARHELPER_ENABLED", :boolean, "false"),
   host:
