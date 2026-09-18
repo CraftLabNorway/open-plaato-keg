@@ -1533,6 +1533,26 @@ defmodule OpenPlaatoKeg.HttpRouter do
     json_response(conn, 200, BatchHistory.list(:keg, conn.params["id"]))
   end
 
+  get "api/kegs/:id/history/csv" do
+    id = conn.params["id"]
+    csv = BatchHistory.to_csv(:keg, BatchHistory.list(:keg, id))
+
+    conn
+    |> put_resp_content_type("text/csv")
+    |> put_resp_header("content-disposition", "attachment; filename=\"keg-#{id}-history.csv\"")
+    |> send_resp(200, csv)
+  end
+
+  get "api/kegs/:id/history/json" do
+    id = conn.params["id"]
+    body = Poison.encode!(BatchHistory.list(:keg, id))
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("content-disposition", "attachment; filename=\"keg-#{id}-history.json\"")
+    |> send_resp(200, body)
+  end
+
   post "api/airlocks/:id/archive" do
     airlock_id = conn.params["id"]
     data = AirlockData.get(airlock_id)
@@ -1559,6 +1579,26 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
   get "api/airlocks/:id/history" do
     json_response(conn, 200, BatchHistory.list(:airlock, conn.params["id"]))
+  end
+
+  get "api/airlocks/:id/history/csv" do
+    id = conn.params["id"]
+    csv = BatchHistory.to_csv(:airlock, BatchHistory.list(:airlock, id))
+
+    conn
+    |> put_resp_content_type("text/csv")
+    |> put_resp_header("content-disposition", "attachment; filename=\"airlock-#{id}-history.csv\"")
+    |> send_resp(200, csv)
+  end
+
+  get "api/airlocks/:id/history/json" do
+    id = conn.params["id"]
+    body = Poison.encode!(BatchHistory.list(:airlock, id))
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("content-disposition", "attachment; filename=\"airlock-#{id}-history.json\"")
+    |> send_resp(200, body)
   end
 
   match _ do

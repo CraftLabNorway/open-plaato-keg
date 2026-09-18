@@ -45,4 +45,40 @@ defmodule OpenPlaatoKeg.Models.BatchHistory do
       [] -> nil
     end
   end
+
+  @doc "Serialise `entries` (as returned by `list/2`) to a CSV string."
+  def to_csv(:keg, entries) do
+    headers = [
+      "archived_at",
+      "label",
+      "beer_style",
+      "keg_date",
+      "og",
+      "fg",
+      "abv",
+      "started_at",
+      "ended_at",
+      "temp_min",
+      "temp_max",
+      "amount_start",
+      "amount_end"
+    ]
+
+    rows_to_csv(headers, entries)
+  end
+
+  def to_csv(:airlock, entries) do
+    headers = ["archived_at", "label", "started_at", "ended_at", "temp_min", "temp_max", "temp_avg", "bubbles_max"]
+    rows_to_csv(headers, entries)
+  end
+
+  defp rows_to_csv(headers, entries) do
+    rows =
+      Enum.map(entries, fn entry ->
+        Enum.map(headers, &(Map.get(entry, &1) || ""))
+      end)
+
+    [headers | rows]
+    |> Enum.map_join("\n", &Enum.join(&1, ","))
+  end
 end
