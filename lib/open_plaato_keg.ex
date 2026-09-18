@@ -62,21 +62,6 @@ defmodule OpenPlaatoKeg do
     ensure_vapid_keys()
   end
 
-  # Generate a VAPID keypair once and persist it via AppConfig (same DETS volume
-  # as everything else), so it survives image rebuilds/redeploys without a
-  # code change and doesn't need to be baked into an env var.
-  defp ensure_vapid_keys do
-    if OpenPlaatoKeg.AppConfig.get(:vapid_public_key, "") == "" do
-      keys = ExNudge.generate_vapid_keys()
-      OpenPlaatoKeg.AppConfig.put(:vapid_public_key, keys.public_key)
-      OpenPlaatoKeg.AppConfig.put(:vapid_private_key, keys.private_key)
-    end
-
-    Application.put_env(:ex_nudge, :vapid_subject, push_config()[:vapid_subject])
-    Application.put_env(:ex_nudge, :vapid_public_key, OpenPlaatoKeg.AppConfig.get(:vapid_public_key))
-    Application.put_env(:ex_nudge, :vapid_private_key, OpenPlaatoKeg.AppConfig.get(:vapid_private_key))
-  end
-
   def tap_handle_dir do
     db_file = Application.get_env(:open_plaato_keg, :db)[:file_path]
     Path.join(Path.dirname(db_file), "tap-handles")
@@ -100,5 +85,20 @@ defmodule OpenPlaatoKeg do
 
   def push_config do
     Application.get_env(:open_plaato_keg, :push)
+  end
+
+  # Generate a VAPID keypair once and persist it via AppConfig (same DETS volume
+  # as everything else), so it survives image rebuilds/redeploys without a
+  # code change and doesn't need to be baked into an env var.
+  defp ensure_vapid_keys do
+    if OpenPlaatoKeg.AppConfig.get(:vapid_public_key, "") == "" do
+      keys = ExNudge.generate_vapid_keys()
+      OpenPlaatoKeg.AppConfig.put(:vapid_public_key, keys.public_key)
+      OpenPlaatoKeg.AppConfig.put(:vapid_private_key, keys.private_key)
+    end
+
+    Application.put_env(:ex_nudge, :vapid_subject, push_config()[:vapid_subject])
+    Application.put_env(:ex_nudge, :vapid_public_key, OpenPlaatoKeg.AppConfig.get(:vapid_public_key))
+    Application.put_env(:ex_nudge, :vapid_private_key, OpenPlaatoKeg.AppConfig.get(:vapid_private_key))
   end
 end
