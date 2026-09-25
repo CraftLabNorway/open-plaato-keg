@@ -253,10 +253,21 @@ defmodule OpenPlaatoKeg.KegDataProcessor do
       ])
     end
 
+    # bubbles_per_min is only written when bpm is freshly computed (see
+    # maybe_compute_bpm/2 — it stays nil without a second reading, or inside
+    # the 60s minimum window). Since AirlockData/DETS only overwrites the
+    # keys it's given, an old bubbles_per_min value otherwise lingers
+    # forever once the device stops reporting, with no way to tell it apart
+    # from a current one. Stamp it with the same timestamp used to compute
+    # it, so readers can tell a fresh value from a stale leftover.
     airlock_fields =
       []
       |> append_field(:temperature, Keyword.get(data, :airlock_temperature))
       |> append_field(:bubbles_per_min, bpm && to_string(bpm))
+      |> append_field(
+        :bubbles_per_min_updated_at,
+        bpm && to_string(new_state[:airlock_last_count_time])
+      )
       |> append_field(:error, Keyword.get(data, :airlock_error))
 
     if id && airlock_fields != [] do

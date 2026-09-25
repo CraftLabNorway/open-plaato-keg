@@ -472,6 +472,7 @@ Send commands to a connected keg:
           "label": "Primary",
           "temperature": "20.5",
           "bubbles_per_min": "2.3",
+          "bubbles_per_min_updated_at": "1699999999999",
           "error": "0"
         }
       ]
@@ -482,6 +483,12 @@ Send commands to a connected keg:
 * **Method:** `GET`
 * **Description:** Retrieves data for a single airlock.
 * **Response:** Airlock object, or `404` if not found.
+* **Note:** `bubbles_per_min` requires two pin readings to compute a rate (see
+  Plaato Airlock pins above), so it can be absent, or stuck on an old value,
+  if the device hasn't reported a second reading recently. Check
+  `bubbles_per_min_updated_at` (Unix ms) against the current time to tell a
+  fresh reading from a stale one — it's only set when `bubbles_per_min` is
+  freshly (re)computed, not on every poll.
 
 #### `/api/airlocks/:id/data`
 
