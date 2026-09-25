@@ -244,8 +244,17 @@ defmodule OpenPlaatoKeg.KegDataProcessor do
     # Hardware resets its count each power-on, so we track the delta each packet.
     {new_state, bubble_total} = accumulate_bubble_total(new_state, state[:airlock_last_count])
 
-    # Persist the updated count/time/total so the next wake-up connection can use it.
-    if id != nil and new_state[:airlock_last_count] != state[:airlock_last_count] do
+    # Persist the updated count/time/total so the next wake-up connection can
+    # seed from it. Gate this on whether a reading was actually parsed this
+    # cycle (the timestamp changes whenever maybe_compute_bpm/2 successfully
+    # parses a count, regardless of whether the value differs) rather than on
+    # whether the raw count changed. Gating on value-change let
+    # last_bubble_count_time go stale whenever two consecutive readings
+    # reported the same raw count (e.g. no new bubble between wake-ups),
+    # which corrupts the elapsed-time basis a later connection's BPM delta
+    # gets computed against -- and, if the count never differs again, freezes
+    # the seed permanently, so no later connection can ever compute a delta.
+    if id != nil and new_state[:airlock_last_count_time] != state[:airlock_last_count_time] do
       AirlockData.publish(id, [
         {:last_bubble_count, to_string(new_state[:airlock_last_count])},
         {:last_bubble_count_time, to_string(new_state[:airlock_last_count_time])},
