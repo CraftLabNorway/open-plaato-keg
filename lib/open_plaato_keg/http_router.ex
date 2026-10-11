@@ -503,6 +503,55 @@ defmodule OpenPlaatoKeg.HttpRouter do
     json_response(conn, 200, %{status: "ok", command: "airlock_label", value: value})
   end
 
+  # Brew details for an airlock (beer style, brew date, OG, FG), like Brew details on kegs.
+  # All fields optional; an empty string clears the field. ABV is computed from OG/FG
+  # with the standard homebrewing formula (OG - FG) × 131.25 when both are valid.
+  post "api/airlocks/:id/brew" do
+    airlock_id = conn.params["id"]
+    p = conn.body_params || %{}
+
+    text = fn key -> (p[key] || "") |> to_string() |> String.trim() |> String.slice(0, 100) end
+    style = text.("beer_style")
+    brew_date = text.("brew_date")
+    og_str = text.("og")
+    fg_str = text.("fg")
+
+    gravity_ok? = fn s -> s == "" or parse_airlock_value(s) != nil end
+
+    if gravity_ok?.(og_str) and gravity_ok?.(fg_str) do
+      abv =
+        with {og, ""} <- Float.parse(og_str),
+             {fg, ""} <- Float.parse(fg_str) do
+          "#{Float.round((og - fg) * 131.25, 2)}"
+        else
+          _ -> ""
+        end
+
+      data = [
+        {:my_beer_style, style},
+        {:my_brew_date, brew_date},
+        {:my_og, og_str},
+        {:my_fg, fg_str},
+        {:my_abv, abv}
+      ]
+
+      AirlockData.publish(airlock_id, data)
+      WebSocketHandler.publish_airlock(airlock_id, data)
+
+      json_response(conn, 200, %{
+        status: "ok",
+        command: "airlock_brew",
+        beer_style: style,
+        brew_date: brew_date,
+        og: og_str,
+        fg: fg_str,
+        abv: abv
+      })
+    else
+      json_response(conn, 400, %{error: "Invalid OG or FG format"})
+    end
+  end
+
   # Grainfather: enable/disable and options for sending this airlock's data to Grainfather web app (max every 15 min).
   post "api/airlocks/:id/grainfather" do
     airlock_id = conn.params["id"]
