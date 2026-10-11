@@ -66,7 +66,7 @@ Raw TCP bytes from Plaato Keg hardware go through a three-stage decoding pipelin
 
 - **HttpRouter** (`http_router.ex`) — Plug/Bandit router serving:
   - REST API for kegs: `/api/kegs`, `/api/kegs/devices`, `/api/kegs/connected`, `/api/kegs/:id`, and command endpoints `/api/kegs/:id/*` (tare, calibrate, beer-style, og, fg, abv, unit, keg-mode, sensitivity, etc.).
-  - REST API for airlocks: `/api/airlocks`, `/api/airlocks/:id`, `/api/airlocks/:id/data` (POST temperature/bubbles_per_min), `/api/airlocks/:id/label`, `/api/airlocks/:id/grainfather`.
+  - REST API for airlocks: `/api/airlocks`, `/api/airlocks/:id`, `/api/airlocks/:id/data` (POST temperature/bubbles_per_min), `/api/airlocks/:id/label`, `/api/airlocks/:id/brew` (my_beer_style, my_brew_date, my_og, my_fg, computed my_abv), `/api/airlocks/:id/grainfather`.
   - `/api/metrics` (Prometheus), `/api/alive`, `/ws` (WebSocket upgrade), static files.
 - **WebSocketHandler** — Broadcasts updates to browser clients via `WebSocketConnectionRegistry`. Keg updates send raw keg JSON; airlock updates send `%{type: "airlock", data: ...}`.
 
