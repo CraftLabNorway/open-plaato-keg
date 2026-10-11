@@ -26,7 +26,19 @@ defmodule OpenPlaatoKeg.Models.DataLog do
 
     if should_log?(device_type, device_id, now) do
       :ets.insert(@throttle_table, {{device_type, device_id}, now})
-      :dets.insert(@table, {{device_type, device_id, now}, data})
+      key = {device_type, device_id, now}
+
+      # An airlock sends several packets within the same second (bubble count,
+      # temperature, error). Entries are keyed by the second, so merge into an
+      # existing entry instead of overwriting it -- otherwise the temperature
+      # packet wipes the bubbles_per_min logged a moment earlier.
+      merged =
+        case :dets.lookup(@table, key) do
+          [{^key, existing}] when is_map(existing) -> Map.merge(existing, data)
+          _ -> data
+        end
+
+      :dets.insert(@table, {key, merged})
     end
 
     :ok
