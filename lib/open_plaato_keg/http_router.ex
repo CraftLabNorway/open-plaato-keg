@@ -518,9 +518,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
     gravity_ok? = fn s -> s == "" or parse_airlock_value(s) != nil end
 
-    if not (gravity_ok?.(og_str) and gravity_ok?.(fg_str)) do
-      json_response(conn, 400, %{error: "Invalid OG or FG format"})
-    else
+    if gravity_ok?.(og_str) and gravity_ok?.(fg_str) do
       abv =
         with {og, ""} <- Float.parse(og_str),
              {fg, ""} <- Float.parse(fg_str) do
@@ -549,6 +547,8 @@ defmodule OpenPlaatoKeg.HttpRouter do
         fg: fg_str,
         abv: abv
       })
+    else
+      json_response(conn, 400, %{error: "Invalid OG or FG format"})
     end
   end
 
