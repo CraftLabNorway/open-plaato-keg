@@ -38,7 +38,7 @@ services:
     restart: always
     ports:
       - "127.0.0.1:8888:8888"
-      - 1883:1883
+      - "127.0.0.1:1883:1883"
     environment:
       - DOCKER_VERNEMQ_ACCEPT_EULA=yes
       - DOCKER_VERNEMQ_USER_CLIENT=client
