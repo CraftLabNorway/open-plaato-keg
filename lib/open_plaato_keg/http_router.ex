@@ -574,16 +574,45 @@ defmodule OpenPlaatoKeg.HttpRouter do
     else
       sg = parsed_sg || "1.0"
       url = (params["url"] || "") |> to_string() |> String.trim()
+      airlock = AirlockData.get(airlock_id) || %{}
 
-      data = [
-        {:grainfather_enabled, to_string(enabled)},
-        {:grainfather_unit, unit},
-        {:grainfather_specific_gravity, sg},
-        {:grainfather_url, url}
-      ]
+      sg_mode = if params["sg_mode"] == "estimated", do: "estimated", else: "manual"
+      og = parse_airlock_value(params["og"])
+      batch_volume = parse_airlock_value(params["batch_volume"])
+      bubble_ml = parse_airlock_value(params["bubble_ml"])
+
+      # Start counting bubbles for this batch when asked, when switching to
+      # estimated mode for the first time, or when the OG changes (new batch).
+      restart? =
+        params["restart_batch"] in [true, "true", "1"] or
+          (sg_mode == "estimated" and airlock[:grainfather_bubble_baseline] in [nil, ""]) or
+          (og != nil and gf_num(og) != gf_num(airlock[:grainfather_og]))
+
+      baseline =
+        if restart?,
+          do: to_string(airlock[:total_bubble_count] || "0"),
+          else: airlock[:grainfather_bubble_baseline]
+
+      data =
+        [
+          {:grainfather_enabled, to_string(enabled)},
+          {:grainfather_unit, unit},
+          {:grainfather_specific_gravity, sg},
+          {:grainfather_url, url},
+          {:grainfather_sg_mode, sg_mode}
+        ]
+        |> then(fn d -> if og, do: [{:grainfather_og, og} | d], else: d end)
+        |> then(fn d -> if batch_volume, do: [{:grainfather_batch_volume, batch_volume} | d], else: d end)
+        |> then(fn d -> if bubble_ml, do: [{:grainfather_bubble_ml, bubble_ml} | d], else: d end)
+        |> then(fn d -> if baseline, do: [{:grainfather_bubble_baseline, baseline} | d], else: d end)
 
       AirlockData.publish(airlock_id, data)
+
+      # Optional: calibrate bubble volume against a hydrometer reading.
+      calibration = calibrate_grainfather(airlock_id, params["measured_sg"])
+
       WebSocketHandler.publish_airlock(airlock_id, data)
+      updated = AirlockData.get(airlock_id) || %{}
 
       json_response(conn, 200, %{
         status: "ok",
@@ -591,8 +620,44 @@ defmodule OpenPlaatoKeg.HttpRouter do
         grainfather_enabled: enabled,
         grainfather_unit: unit,
         grainfather_specific_gravity: sg,
-        grainfather_url: url
+        grainfather_url: url,
+        grainfather_sg_mode: sg_mode,
+        grainfather_og: updated[:grainfather_og],
+        grainfather_batch_volume: updated[:grainfather_batch_volume],
+        grainfather_bubble_ml: updated[:grainfather_bubble_ml],
+        grainfather_bubbles_since_start: OpenPlaatoKeg.Grainfather.bubbles_since_start(updated),
+        grainfather_estimated_sg: OpenPlaatoKeg.Grainfather.estimated_sg(updated),
+        calibration: calibration
       })
+    end
+  end
+
+  defp gf_num(nil), do: nil
+
+  defp gf_num(v) do
+    case Float.parse(to_string(v)) do
+      {f, _} -> f
+      :error -> nil
+    end
+  end
+
+  defp calibrate_grainfather(_airlock_id, measured) when measured in [nil, ""], do: nil
+
+  defp calibrate_grainfather(airlock_id, measured) do
+    airlock = AirlockData.get(airlock_id) || %{}
+    ml =
+      OpenPlaatoKeg.GravityEstimate.calibrate_bubble_ml(
+        gf_num(airlock[:grainfather_og]),
+        gf_num(airlock[:grainfather_batch_volume]),
+        OpenPlaatoKeg.Grainfather.bubbles_since_start(airlock),
+        gf_num(measured)
+      )
+
+    if ml do
+      AirlockData.publish(airlock_id, [{:grainfather_bubble_ml, to_string(ml)}])
+      %{status: "ok", bubble_ml: ml}
+    else
+      %{status: "error", error: "Can't calibrate yet: needs OG, batch volume, some bubbles counted, and a reading below OG."}
     end
   end
 

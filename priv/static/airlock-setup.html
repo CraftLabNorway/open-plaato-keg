@@ -121,11 +121,59 @@
             </div>
             <div class="column">
               <div class="field">
-                <label class="label">Specific gravity</label>
-                <p class="help">Required by API; use your current reading or default 1.0</p>
+                <label class="label">Specific gravity (manual)</label>
+                <p class="help">Used in Manual mode, and as a fallback in Estimated mode. Default 1.0</p>
                 <div class="control">
                   <input class="input" type="number" id="grainfatherSG" placeholder="1.0" step="0.001" min="0.9" max="1.2" />
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">SG mode</label>
+            <p class="help">The airlock counts bubbles, it can't measure gravity. <b>Estimated</b> calculates an approximate current SG from OG, batch volume and bubbles counted since the batch started. Lid leaks, bubble size and temperature affect accuracy — calibrate with a hydrometer reading for better results.</p>
+            <div class="control">
+              <div class="select">
+                <select id="grainfatherSgMode">
+                  <option value="manual">Manual (send the value above)</option>
+                  <option value="estimated">Estimated from bubbles</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="columns">
+            <div class="column">
+              <div class="field">
+                <label class="label">OG</label>
+                <div class="control"><input class="input" type="number" id="grainfatherOG" placeholder="1.050" step="0.001" min="1.0" max="1.2" /></div>
+              </div>
+            </div>
+            <div class="column">
+              <div class="field">
+                <label class="label">Batch volume (L)</label>
+                <div class="control"><input class="input" type="number" id="grainfatherBatchVolume" placeholder="20" step="0.1" min="0" /></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="columns">
+            <div class="column">
+              <div class="field">
+                <label class="label">Calibrate with hydrometer reading (optional)</label>
+                <p class="help">Take a reading once fermentation is well underway and enter it here. The bubble size is adjusted so the estimate matches.</p>
+                <div class="control"><input class="input" type="number" id="grainfatherMeasuredSG" placeholder="e.g. 1.024" step="0.001" min="0.98" max="1.2" /></div>
+              </div>
+            </div>
+            <div class="column">
+              <div class="field">
+                <label class="label">Current estimate</label>
+                <p class="help" id="grainfatherEstimateInfo">—</p>
+                <label class="label" style="font-weight:normal;">
+                  <input type="checkbox" id="grainfatherRestartBatch" />
+                  <span style="margin-left: 0.5rem;">Start new batch (reset bubble count)</span>
+                </label>
               </div>
             </div>
           </div>
@@ -277,6 +325,11 @@
           const gfSg = data.grainfather_specific_gravity;
           document.getElementById('grainfatherSG').value = (gfSg != null && gfSg !== '') ? String(gfSg) : '1';
           document.getElementById('grainfatherUrl').value = data.grainfather_url || '';
+          document.getElementById('grainfatherSgMode').value = data.grainfather_sg_mode === 'estimated' ? 'estimated' : 'manual';
+          document.getElementById('grainfatherOG').value = data.grainfather_og || '';
+          document.getElementById('grainfatherBatchVolume').value = data.grainfather_batch_volume || '';
+          document.getElementById('grainfatherEstimateInfo').textContent = data.grainfather_estimated_sg
+            ? `Last sent estimate: ${data.grainfather_estimated_sg}` : '—';
           document.getElementById('brewfatherEnabled').checked = data.brewfather_enabled === 'true';
           document.getElementById('brewfatherUnit').value = data.brewfather_temp_unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
           const bfSg = data.brewfather_sg;
@@ -298,6 +351,10 @@
         document.getElementById('grainfatherUnit').value = 'celsius';
         document.getElementById('grainfatherSG').value = '1';
         document.getElementById('grainfatherUrl').value = '';
+        document.getElementById('grainfatherSgMode').value = 'manual';
+        document.getElementById('grainfatherOG').value = '';
+        document.getElementById('grainfatherBatchVolume').value = '';
+        document.getElementById('grainfatherEstimateInfo').textContent = '—';
         document.getElementById('brewfatherEnabled').checked = false;
         document.getElementById('brewfatherUnit').value = 'celsius';
         document.getElementById('brewfatherSG').value = '1';
@@ -331,15 +388,30 @@
       const unit = document.getElementById('grainfatherUnit').value;
       const sg = document.getElementById('grainfatherSG').value.trim() || '1';
       const url = document.getElementById('grainfatherUrl').value.trim();
+      const sg_mode = document.getElementById('grainfatherSgMode').value;
+      const og = document.getElementById('grainfatherOG').value.trim();
+      const batch_volume = document.getElementById('grainfatherBatchVolume').value.trim();
+      const measured_sg = document.getElementById('grainfatherMeasuredSG').value.trim();
+      const restart_batch = document.getElementById('grainfatherRestartBatch').checked;
+      if (sg_mode === 'estimated' && (!og || !batch_volume)) {
+        showToast('Estimated mode needs OG and batch volume', 'warning'); return;
+      }
       fetch(`/api/airlocks/${airlockId}/grainfather`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, unit, specific_gravity: sg, url }),
+        body: JSON.stringify({ enabled, unit, specific_gravity: sg, url, sg_mode, og, batch_volume, measured_sg, restart_batch }),
       })
         .then(r => r.json())
         .then(data => {
-          if (data.status === 'ok') showToast('Grainfather settings saved', 'success');
-          else showToast(`Error: ${data.error}`, 'danger');
+          if (data.status !== 'ok') { showToast(`Error: ${data.error}`, 'danger'); return; }
+          document.getElementById('grainfatherMeasuredSG').value = '';
+          document.getElementById('grainfatherRestartBatch').checked = false;
+          const est = data.grainfather_estimated_sg;
+          document.getElementById('grainfatherEstimateInfo').textContent = est
+            ? `Estimated SG now: ${est} (${data.grainfather_bubbles_since_start} bubbles this batch)` : '—';
+          if (data.calibration && data.calibration.status === 'error') showToast(data.calibration.error, 'warning');
+          else if (data.calibration) showToast('Saved and calibrated', 'success');
+          else showToast('Grainfather settings saved', 'success');
         })
         .catch(err => showToast(`Error: ${err.message}`, 'danger'));
     }
