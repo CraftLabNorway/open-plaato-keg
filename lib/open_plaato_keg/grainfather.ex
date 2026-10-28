@@ -32,6 +32,43 @@ defmodule OpenPlaatoKeg.Grainfather do
     end
   end
 
+  @doc """
+  SG to send: the bubble-based estimate when `grainfather_sg_mode` is
+  "estimated" and OG + batch volume are set, otherwise the manual value.
+  The estimate is also stored as `grainfather_estimated_sg` for the UI.
+  """
+  def current_sg(airlock_id, airlock) do
+    manual = parse_specific_gravity(airlock[:grainfather_specific_gravity])
+
+    if airlock[:grainfather_sg_mode] == "estimated" do
+      case estimated_sg(airlock) do
+        nil ->
+          manual
+
+        est ->
+          AirlockData.publish(airlock_id, [{:grainfather_estimated_sg, to_string(est)}])
+          est
+      end
+    else
+      manual
+    end
+  end
+
+  def estimated_sg(airlock) do
+    og = parse_number(airlock[:grainfather_og])
+    volume = parse_number(airlock[:grainfather_batch_volume])
+    bubble_ml = parse_number(airlock[:grainfather_bubble_ml]) || GravityEstimate.default_bubble_ml()
+    GravityEstimate.estimate(og, volume, bubbles_since_start(airlock), bubble_ml)
+  end
+
+  @doc "Bubbles counted since the batch baseline was set."
+  def bubbles_since_start(airlock) do
+    total = parse_number(airlock[:total_bubble_count]) || 0
+    baseline = parse_number(airlock[:grainfather_bubble_baseline]) || 0
+    # Lifetime total should never go backwards; if it did, count from zero.
+    if total >= baseline, do: total - baseline, else: total
+  end
+
   defp throttle_ok?(airlock) do
     case airlock[:grainfather_last_sent_at] do
       nil -> true
@@ -109,43 +146,6 @@ defmodule OpenPlaatoKeg.Grainfather do
           :error
       end
     end
-  end
-
-  @doc """
-  SG to send: the bubble-based estimate when `grainfather_sg_mode` is
-  "estimated" and OG + batch volume are set, otherwise the manual value.
-  The estimate is also stored as `grainfather_estimated_sg` for the UI.
-  """
-  def current_sg(airlock_id, airlock) do
-    manual = parse_specific_gravity(airlock[:grainfather_specific_gravity])
-
-    if airlock[:grainfather_sg_mode] == "estimated" do
-      case estimated_sg(airlock) do
-        nil ->
-          manual
-
-        est ->
-          AirlockData.publish(airlock_id, [{:grainfather_estimated_sg, to_string(est)}])
-          est
-      end
-    else
-      manual
-    end
-  end
-
-  def estimated_sg(airlock) do
-    og = parse_number(airlock[:grainfather_og])
-    volume = parse_number(airlock[:grainfather_batch_volume])
-    bubble_ml = parse_number(airlock[:grainfather_bubble_ml]) || GravityEstimate.default_bubble_ml()
-    GravityEstimate.estimate(og, volume, bubbles_since_start(airlock), bubble_ml)
-  end
-
-  @doc "Bubbles counted since the batch baseline was set."
-  def bubbles_since_start(airlock) do
-    total = parse_number(airlock[:total_bubble_count]) || 0
-    baseline = parse_number(airlock[:grainfather_bubble_baseline]) || 0
-    # Lifetime total should never go backwards; if it did, count from zero.
-    if total >= baseline, do: total - baseline, else: total
   end
 
   defp parse_number(nil), do: nil

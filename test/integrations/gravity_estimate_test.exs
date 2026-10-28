@@ -4,6 +4,7 @@ defmodule OpenPlaatoKeg.GravityEstimateTest do
 
   test "no bubbles yet returns OG" do
     assert GravityEstimate.estimate(1.050, 20, 0) == 1.050
+    assert GravityEstimate.estimate(1.050, 20, 0.0) == 1.050
   end
 
   test "typical 5% beer lands near expected FG" do
