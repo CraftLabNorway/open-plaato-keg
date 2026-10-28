@@ -515,6 +515,7 @@ Send commands to a connected keg:
   ```
 * `url` is the per-airlock Grainfather endpoint URL (found in your Grainfather session). Sending is skipped if the URL is not set.
 * When enabled, airlock data is forwarded to the Grainfather community web app at most once every 15 minutes (requires temperature; BPM is optional).
+* Optional estimated SG: `"sg_mode": "estimated"` with `"og"` and `"batch_volume"` (litres) sends an approximate current SG calculated from bubbles counted since the batch started, instead of the static `specific_gravity`. The bubble count restarts when OG changes, on first switch to estimated mode, or with `"restart_batch": true`. Send `"measured_sg"` (a hydrometer reading) to calibrate the bubble volume. Falls back to `specific_gravity` when the estimate can't be computed. Only works for airlocks that report bubble counts over Blynk.
 
 #### `/api/airlocks/:id/brewfather`
 
