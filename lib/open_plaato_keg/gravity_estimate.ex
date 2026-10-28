@@ -66,7 +66,8 @@ defmodule OpenPlaatoKeg.GravityEstimate do
 
   def calibrate_bubble_ml(_, _, _, _), do: nil
 
-  defp co2_produced_g(_volume, 0, _bubble_ml), do: 0.0
+  # Bubble counts arrive as floats from DETS strings, so compare with ==.
+  defp co2_produced_g(_volume, bubbles, _bubble_ml) when bubbles == 0, do: 0.0
 
   defp co2_produced_g(volume, bubbles, bubble_ml) do
     bubbles * bubble_ml * @co2_density_g_per_ml + @dissolved_co2_g_per_l * volume
