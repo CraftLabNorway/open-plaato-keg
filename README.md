@@ -309,6 +309,10 @@ Features:
 - Beverage library management
 - Configurable server URL via Settings tab
 
+### iPhone Home-Screen Widget (Scriptable)
+
+A community-made large widget showing an airlock's temperature, bubbles/min and a graph of recent readings. See [`widgets/ios-scriptable`](widgets/ios-scriptable/) for the script and setup steps.
+
 ### HTTP REST API
 
 #### `/api/config`
