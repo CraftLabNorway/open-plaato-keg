@@ -438,7 +438,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
   get "api/airlocks/:id" do
     id = conn.params["id"]
-    data = AirlockData.get(id)
+    data = id |> AirlockData.get() |> with_fermentation_fields()
 
     if id in AirlockData.devices() do
       conn
@@ -1580,6 +1580,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
     id = conn.params["id"]
     range = conn.query_params["range"] || "30d"
     {from_ts, to_ts} = parse_time_range(range)
+    from_ts = airlock_log_start(conn, id, from_ts)
     entries = DataLog.get(:airlock, id, from_ts, to_ts)
     csv = DataLog.to_csv(:airlock, entries)
 
@@ -1593,6 +1594,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
     id = conn.params["id"]
     range = conn.query_params["range"] || "24h"
     {from_ts, to_ts} = parse_time_range(range)
+    from_ts = airlock_log_start(conn, id, from_ts)
     entries = DataLog.get(:airlock, id, from_ts, to_ts)
     json_response(conn, 200, entries)
   end
@@ -1668,27 +1670,37 @@ defmodule OpenPlaatoKeg.HttpRouter do
   end
 
   post "api/airlocks/:id/archive" do
+    json_response(conn, 200, archive_airlock(conn.params["id"]))
+  end
+
+  # Start a new fermentation: archive the current one, then restart the
+  # per-fermentation bubble count, the Grainfather SG estimate baseline and
+  # the readings log window from now. Non-destructive: the lifetime
+  # total_bubble_count keeps counting and raw readings stay in the log
+  # (pruned after 90 days as usual) -- only the starting point moves, and
+  # ?all=1 on the log endpoints still returns everything.
+  post "api/airlocks/:id/new-fermentation" do
     airlock_id = conn.params["id"]
-    data = AirlockData.get(airlock_id)
-    now = System.system_time(:second)
-    range_start = BatchHistory.most_recent_timestamp(:airlock, airlock_id) || now - 90 * 86_400
-    entries = DataLog.get(:airlock, airlock_id, range_start, now)
 
-    temps = entries |> Enum.map(&parse_float_or_nil(&1["temperature"])) |> Enum.reject(&is_nil/1)
-    bubbles = entries |> Enum.map(&parse_float_or_nil(&1["bubbles_per_min"])) |> Enum.reject(&is_nil/1)
+    if airlock_id in AirlockData.devices() do
+      archived = archive_airlock(airlock_id)
+      started_at = to_string(archived["archived_at"])
+      total = to_string(AirlockData.get(airlock_id)[:total_bubble_count] || "0")
 
-    snapshot = %{
-      "label" => data[:label],
-      "started_at" => range_start,
-      "ended_at" => now,
-      "temp_min" => (if temps == [], do: nil, else: Enum.min(temps)),
-      "temp_max" => (if temps == [], do: nil, else: Enum.max(temps)),
-      "temp_avg" => (if temps == [], do: nil, else: Float.round(Enum.sum(temps) / length(temps), 1)),
-      "bubbles_max" => (if bubbles == [], do: nil, else: Enum.max(bubbles))
-    }
+      AirlockData.publish(airlock_id, [
+        {:fermentation_started_at, started_at},
+        {:fermentation_bubble_baseline, total},
+        {:grainfather_bubble_baseline, total}
+      ])
 
-    {:ok, archived_at} = BatchHistory.archive(:airlock, airlock_id, snapshot)
-    json_response(conn, 200, Map.put(snapshot, "archived_at", archived_at))
+      json_response(conn, 200, %{
+        status: "ok",
+        archived: archived,
+        fermentation_started_at: started_at
+      })
+    else
+      json_response(conn, 404, %{error: "not_found"})
+    end
   end
 
   get "api/airlocks/:id/history" do
@@ -1736,6 +1748,66 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
     {now - seconds, now}
   end
+
+  defp archive_airlock(airlock_id) do
+    data = AirlockData.get(airlock_id)
+    now = System.system_time(:second)
+    range_start = BatchHistory.most_recent_timestamp(:airlock, airlock_id) || now - 90 * 86_400
+    entries = DataLog.get(:airlock, airlock_id, range_start, now)
+
+    temps = entries |> Enum.map(&parse_float_or_nil(&1["temperature"])) |> Enum.reject(&is_nil/1)
+
+    bubbles =
+      entries |> Enum.map(&parse_float_or_nil(&1["bubbles_per_min"])) |> Enum.reject(&is_nil/1)
+
+    snapshot = %{
+      "label" => data[:label],
+      "started_at" => range_start,
+      "ended_at" => now,
+      "temp_min" => if(temps == [], do: nil, else: Enum.min(temps)),
+      "temp_max" => if(temps == [], do: nil, else: Enum.max(temps)),
+      "temp_avg" =>
+        if(temps == [], do: nil, else: Float.round(Enum.sum(temps) / length(temps), 1)),
+      "bubbles_max" => if(bubbles == [], do: nil, else: Enum.max(bubbles)),
+      "fermentation_bubble_count" => fermentation_bubble_count(data)
+    }
+
+    {:ok, archived_at} = BatchHistory.archive(:airlock, airlock_id, snapshot)
+    Map.put(snapshot, "archived_at", archived_at)
+  end
+
+  # Bubbles counted since the current fermentation started (lifetime total
+  # minus the total at the moment "new fermentation" was pressed).
+  defp fermentation_bubble_count(data) do
+    total = parse_int_or_zero(data[:total_bubble_count])
+    baseline = parse_int_or_zero(data[:fermentation_bubble_baseline])
+    max(total - baseline, 0)
+  end
+
+  defp with_fermentation_fields(data) do
+    Map.put(data, :fermentation_bubble_count, to_string(fermentation_bubble_count(data)))
+  end
+
+  # Airlock log endpoints start at the current fermentation, unless ?all=1.
+  defp airlock_log_start(conn, id, from_ts) do
+    started_at = parse_int_or_zero(AirlockData.get(id)[:fermentation_started_at])
+
+    if conn.query_params["all"] in ["1", "true"] or started_at == 0,
+      do: from_ts,
+      else: max(from_ts, started_at)
+  end
+
+  defp parse_int_or_zero(nil), do: 0
+  defp parse_int_or_zero(v) when is_integer(v), do: v
+
+  defp parse_int_or_zero(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {int, _} -> int
+      :error -> 0
+    end
+  end
+
+  defp parse_int_or_zero(_), do: 0
 
   defp json_response(conn, status, data) do
     conn
