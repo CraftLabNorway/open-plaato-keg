@@ -489,6 +489,23 @@ Send commands to a connected keg:
   `bubbles_per_min_updated_at` (Unix ms) against the current time to tell a
   fresh reading from a stale one — it's only set when `bubbles_per_min` is
   freshly (re)computed, not on every poll.
+* `fermentation_bubble_count` (derived): bubbles counted since the current
+  fermentation started — see `/api/airlocks/:id/new-fermentation`. Equals
+  `total_bubble_count` until a new fermentation has been started.
+
+#### `/api/airlocks/:id/new-fermentation`
+
+* **Method:** `POST`
+* **Description:** Start a new fermentation. Archives the current one to batch
+  history (like `/api/airlocks/:id/archive`), then restarts
+  `fermentation_bubble_count`, the Grainfather estimated-SG bubble baseline and
+  the readings log window from now (`fermentation_started_at`, Unix seconds).
+* **Body:** `{}`
+* **Non-destructive:** the lifetime `total_bubble_count` keeps counting and raw
+  readings are not deleted. `/api/airlocks/:id/log` and `/log/csv` return
+  readings from the current fermentation only; add `?all=1` to get everything
+  within the selected `range`.
+* **Response:** `{ "status": "ok", "archived": { ... }, "fermentation_started_at": "..." }`, or `404` if the airlock is unknown.
 
 #### `/api/airlocks/:id/data`
 
