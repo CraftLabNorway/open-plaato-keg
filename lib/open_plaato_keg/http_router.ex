@@ -1669,6 +1669,16 @@ defmodule OpenPlaatoKeg.HttpRouter do
     |> send_resp(200, body)
   end
 
+  # Remove a single archive entry (e.g. a test run). Only the archived
+  # summary is deleted; raw readings stay in the data log.
+  post "api/kegs/:id/history/:archived_at/delete" do
+    delete_history_entry(conn, :keg)
+  end
+
+  post "api/airlocks/:id/history/:archived_at/delete" do
+    delete_history_entry(conn, :airlock)
+  end
+
   post "api/airlocks/:id/archive" do
     json_response(conn, 200, archive_airlock(conn.params["id"]))
   end
@@ -1749,10 +1759,34 @@ defmodule OpenPlaatoKeg.HttpRouter do
     {now - seconds, now}
   end
 
+  defp delete_history_entry(conn, device_type) do
+    id = conn.params["id"]
+
+    with {archived_at, ""} <- Integer.parse(conn.params["archived_at"]),
+         :ok <- BatchHistory.delete(device_type, id, archived_at) do
+      Logger.info("Deleted #{device_type} history entry #{archived_at} for #{id}", [])
+      json_response(conn, 200, %{status: "ok", deleted: archived_at})
+    else
+      :not_found -> json_response(conn, 404, %{error: "not_found"})
+      _ -> json_response(conn, 400, %{error: "invalid_archived_at"})
+    end
+  end
+
   defp archive_airlock(airlock_id) do
     data = AirlockData.get(airlock_id)
     now = System.system_time(:second)
-    range_start = BatchHistory.most_recent_timestamp(:airlock, airlock_id) || now - 90 * 86_400
+
+    # The cycle starts at the latest archive or at the last "new fermentation",
+    # whichever is later -- so deleting a history entry can't stretch the next
+    # archive back over a fermentation that was already closed.
+    range_start =
+      case max(
+             BatchHistory.most_recent_timestamp(:airlock, airlock_id) || 0,
+             parse_int_or_zero(data[:fermentation_started_at])
+           ) do
+        0 -> now - 90 * 86_400
+        ts -> ts
+      end
     entries = DataLog.get(:airlock, airlock_id, range_start, now)
 
     temps = entries |> Enum.map(&parse_float_or_nil(&1["temperature"])) |> Enum.reject(&is_nil/1)

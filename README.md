@@ -507,6 +507,18 @@ Send commands to a connected keg:
   within the selected `range`.
 * **Response:** `{ "status": "ok", "archived": { ... }, "fermentation_started_at": "..." }`, or `404` if the airlock is unknown.
 
+
+#### `/api/airlocks/:id/history/:archived_at/delete` and `/api/kegs/:id/history/:archived_at/delete`
+
+* **Method:** `POST`
+* **Description:** Delete one batch-history entry (e.g. a test run).
+  `:archived_at` is the entry's `archived_at` value (Unix seconds) as returned
+  by `/api/airlocks/:id/history` or `/api/kegs/:id/history`.
+* **Response:** `{"status": "ok", "deleted": <archived_at>}`, `404` if the
+  device has no such entry, `400` if `:archived_at` is not an integer.
+* Only the archived summary is removed; raw readings in the data log are kept
+  (and pruned after 90 days as usual).
+
 #### `/api/airlocks/:id/data`
 
 * **Method:** `POST`

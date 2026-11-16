@@ -38,6 +38,24 @@ defmodule OpenPlaatoKeg.Models.BatchHistory do
     end
   end
 
+  @doc """
+  Delete one archive entry, identified by its `archived_at` timestamp.
+  Returns `:ok`, or `:not_found` when the device has no such entry. Only the
+  archived summary is removed; raw readings in the data log are untouched.
+  """
+  def delete(device_type, device_id, archived_at) when is_integer(archived_at) do
+    key = {device_type, device_id, archived_at}
+
+    case :dets.lookup(@table, key) do
+      [_ | _] ->
+        :dets.delete(@table, key)
+        :ok
+
+      _ ->
+        :not_found
+    end
+  end
+
   @doc "Timestamp of the most recent archive for a device, or `nil` if none exist yet."
   def most_recent_timestamp(device_type, device_id) do
     case list(device_type, device_id) do
