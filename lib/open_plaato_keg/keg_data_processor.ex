@@ -178,7 +178,9 @@ defmodule OpenPlaatoKeg.KegDataProcessor do
       {&OpenPlaatoKeg.MqttHandler.publish/2,
        fn -> confirmed_keg? and OpenPlaatoKeg.mqtt_config()[:enabled] end},
       {&OpenPlaatoKeg.BarHelper.publish/2,
-       fn -> confirmed_keg? and amount_left_changed? and OpenPlaatoKeg.barhelper_config()[:enabled] end}
+       fn -> confirmed_keg? and amount_left_changed? and OpenPlaatoKeg.barhelper_config()[:enabled] end},
+      # Per-keg BarHelper (owner's own key, set on /my); rate-limited, never blocks.
+      {&OpenPlaatoKeg.BarHelperKeg.publish/2, fn -> confirmed_keg? and amount_left_changed? end}
     ])
 
     if confirmed_keg? and id != nil do
