@@ -30,9 +30,6 @@ defmodule OpenPlaatoKeg.BarHelperKeg do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
 
-  @impl true
-  def init(_), do: {:ok, %{pending: %{}, timers: %{}}}
-
   @doc "Called by the keg data processor when amount_left changed. Never blocks or raises."
   def publish(id, data) do
     case Keyword.get(data, :amount_left) do
@@ -59,6 +56,9 @@ defmodule OpenPlaatoKeg.BarHelperKeg do
         end
     end
   end
+
+  @impl true
+  def init(_), do: {:ok, %{pending: %{}, timers: %{}}}
 
   @impl true
   def handle_cast({:amount, id, raw_amount}, state) do
@@ -94,34 +94,6 @@ defmodule OpenPlaatoKeg.BarHelperKeg do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp schedule(state, id, amount, wait) do
-    timers =
-      if Map.has_key?(state.timers, id),
-        do: state.timers,
-        else: Map.put(state.timers, id, Process.send_after(self(), {:flush, id}, wait))
-
-    %{state | pending: Map.put(state.pending, id, amount), timers: timers}
-  end
-
-  defp start_send(id, amount) do
-    # Mark the attempt first, so the rate limit holds even if the task is slow.
-    BarHelperConfig.put(id, %{last_attempt_at: now_ms()})
-
-    Task.Supervisor.start_child(OpenPlaatoKeg.BarHelperTaskSupervisor, fn ->
-      deliver(id, BarHelperConfig.get(id), amount)
-    end)
-  end
-
-  defp active?(s),
-    do: s[:enabled] == true and BarHelperConfig.configured?(s) and (s[:monitor_id] || "") != ""
-
-  defp wait_ms(settings) do
-    case settings[:last_attempt_at] do
-      ts when is_integer(ts) -> max(0, ts + @min_interval_ms - now_ms())
-      _ -> 0
-    end
-  end
-
   @doc false
   def deliver(id, settings, amount) do
     key = settings[:api_key] || ""
@@ -153,6 +125,34 @@ defmodule OpenPlaatoKeg.BarHelperKeg do
         BarHelperConfig.put(id, %{last_status: "error", last_error: msg, last_attempt_at: now})
         Logger.warning("BarHelper: keg #{short(id)} not sent: #{msg}")
         {:error, msg}
+    end
+  end
+
+  defp schedule(state, id, amount, wait) do
+    timers =
+      if Map.has_key?(state.timers, id),
+        do: state.timers,
+        else: Map.put(state.timers, id, Process.send_after(self(), {:flush, id}, wait))
+
+    %{state | pending: Map.put(state.pending, id, amount), timers: timers}
+  end
+
+  defp start_send(id, amount) do
+    # Mark the attempt first, so the rate limit holds even if the task is slow.
+    BarHelperConfig.put(id, %{last_attempt_at: now_ms()})
+
+    Task.Supervisor.start_child(OpenPlaatoKeg.BarHelperTaskSupervisor, fn ->
+      deliver(id, BarHelperConfig.get(id), amount)
+    end)
+  end
+
+  defp active?(s),
+    do: s[:enabled] == true and BarHelperConfig.configured?(s) and (s[:monitor_id] || "") != ""
+
+  defp wait_ms(settings) do
+    case settings[:last_attempt_at] do
+      ts when is_integer(ts) -> max(0, ts + @min_interval_ms - now_ms())
+      _ -> 0
     end
   end
 
