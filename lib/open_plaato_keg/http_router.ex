@@ -4,6 +4,7 @@ defmodule OpenPlaatoKeg.HttpRouter do
   alias OpenPlaatoKeg.KegCommander
   alias OpenPlaatoKeg.Metrics
   alias OpenPlaatoKeg.Models.AirlockData
+  alias OpenPlaatoKeg.Models.BarHelperConfig
   alias OpenPlaatoKeg.Models.BatchHistory
   alias OpenPlaatoKeg.Models.BeerDB
   alias OpenPlaatoKeg.Models.BeverageDB
@@ -416,10 +417,54 @@ defmodule OpenPlaatoKeg.HttpRouter do
 
   # ============================================
   # Delete a keg and all its stored data from DETS (e.g. decommissioned or phantom kegs).
+  # ============================================
+  # BarHelper per keg (owner's own API key; never returned, see BarHelperConfig)
+  # ============================================
+
+  get "api/kegs/:id/barhelper" do
+    keg_id = conn.params["id"]
+
+    if keg_exists?(keg_id),
+      do: json_response(conn, 200, BarHelperConfig.public(keg_id)),
+      else: json_response(conn, 404, %{error: "not_found"})
+  end
+
+  post "api/kegs/:id/barhelper" do
+    keg_id = conn.params["id"]
+    params = conn.body_params || %{}
+
+    with true <- keg_exists?(keg_id) || {:error, 404, "not_found"},
+         {:ok, changes} <- barhelper_changes(keg_id, params) do
+      BarHelperConfig.put(keg_id, changes)
+      json_response(conn, 200, Map.put(BarHelperConfig.public(keg_id), :status, "ok"))
+    else
+      {:error, status, message} -> json_response(conn, status, %{status: "error", error: message})
+    end
+  end
+
+  post "api/kegs/:id/barhelper/test" do
+    keg_id = conn.params["id"]
+
+    if keg_exists?(keg_id) do
+      {result, message} = OpenPlaatoKeg.BarHelperKeg.test_send(keg_id)
+
+      json_response(
+        conn,
+        200,
+        BarHelperConfig.public(keg_id)
+        |> Map.put(:status, if(result == :ok, do: "ok", else: "error"))
+        |> Map.put(:message, message)
+      )
+    else
+      json_response(conn, 404, %{error: "not_found"})
+    end
+  end
+
   post "api/kegs/:id/delete" do
     keg_id = conn.params["id"]
     KegCommander.disconnect(keg_id)
     KegData.delete(keg_id)
+    BarHelperConfig.delete(keg_id)
     WebSocketHandler.broadcast_keg_removed(keg_id)
     Logger.info("Deleted keg #{keg_id} from DETS", [])
     json_response(conn, 200, %{status: "ok", deleted: keg_id})
@@ -1842,6 +1887,35 @@ defmodule OpenPlaatoKeg.HttpRouter do
   end
 
   defp parse_int_or_zero(_), do: 0
+
+  # KegData.get/1 always adds :id, so check the registered keg list instead.
+  defp keg_exists?(id), do: id in KegData.devices()
+
+  # Validated changes for POST /api/kegs/:id/barhelper. An empty or missing
+  # api_key keeps the stored one; "clear_api_key": true removes it.
+  defp barhelper_changes(keg_id, params) do
+    current = BarHelperConfig.get(keg_id)
+    enabled = params["enabled"] in [true, "true", "1", 1]
+    key = params["api_key"] |> to_string() |> String.trim()
+    monitor_id = (params["monitor_id"] || current[:monitor_id] || "") |> to_string() |> String.trim()
+    unit = (params["unit"] || current[:unit] || "l") |> to_string() |> String.trim()
+
+    key =
+      cond do
+        params["clear_api_key"] in [true, "true"] -> ""
+        key == "" -> current[:api_key] || ""
+        true -> key
+      end
+
+    cond do
+      String.length(key) > 512 -> {:error, 422, "API key is too long."}
+      String.length(monitor_id) > 100 -> {:error, 422, "Monitor ID is too long (max 100 characters)."}
+      unit not in BarHelperConfig.units() -> {:error, 422, "Unknown unit."}
+      enabled and key == "" -> {:error, 422, "Add your BarHelper API key to enable sending."}
+      enabled and monitor_id == "" -> {:error, 422, "Add the keg monitor ID to enable sending."}
+      true -> {:ok, %{enabled: enabled, api_key: key, monitor_id: monitor_id, unit: unit}}
+    end
+  end
 
   defp json_response(conn, status, data) do
     conn

@@ -11,6 +11,8 @@ defmodule OpenPlaatoKeg.Supervisor do
       [
         mqtt_spec(),
         barhelper_spec(),
+        {Task.Supervisor, name: OpenPlaatoKeg.BarHelperTaskSupervisor},
+        OpenPlaatoKeg.BarHelperKeg,
         ws_registry_spec(),
         keg_socket_registry_spec(),
         tcp_listener_spec(),

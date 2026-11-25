@@ -59,6 +59,11 @@ defmodule OpenPlaatoKeg do
     batch_history_path = Path.join(db_folder, "batch_history.bin")
     {:ok, _} = :dets.open_file(:batch_history, [{:file, String.to_charlist(batch_history_path)}])
 
+    # Per-keg BarHelper settings incl. the owner's API key — separate from keg_data
+    # so the key can never reach the public keg JSON, WebSocket, MQTT or metrics.
+    barhelper_config_path = Path.join(db_folder, "barhelper_config.bin")
+    {:ok, _} = :dets.open_file(:barhelper_config, [{:file, String.to_charlist(barhelper_config_path)}])
+
     # Ensure tap handle image directory exists (persistent volume)
     File.mkdir_p!(Path.join(db_folder, "tap-handles"))
 
